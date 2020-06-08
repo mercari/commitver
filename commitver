@@ -44,9 +44,7 @@ function repo_git() {
 }
 
 # Check if this is a new git repo with no commits
-# No commits is equal to 1 commit, at 0.0.0
-# and purely exists to make this work when setting
-# up a new repo.
+# This is arbitrarily defined to be version 0.0.0
 any_commit=$(repo_git rev-list -n 1 --all)
 
 if [ -z "${any_commit}" ] ; then
@@ -55,12 +53,11 @@ if [ -z "${any_commit}" ] ; then
 fi
 
 current_commit=$(repo_git rev-parse HEAD)
-oldest_commit=$(repo_git rev-list --max-parents=0 HEAD)
 
 # Check the config file for a version override
-# Output format: "${commit_sha} ${version}"
-# This function should return either the latest valid version number found in git history in the config file
-# OR the oldest commit SHA and the default version number 0.0.0
+# Output format: "${commit_ref} ${version}"
+# This function should return either the `commit sha` of the last valid change to the config file + `version number` found in the config file
+# OR `ROOT` which should be interpreted as "before the first commit" in git history + the default version number `0.0.0`
 #
 #  - Broken config files are ignored
 #  - Deleted config files are still found via git history (deleting the config file doesn't break the linearity of version numbers)
