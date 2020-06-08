@@ -1,0 +1,137 @@
+#!/bin/bash
+
+##
+## commitver
+##
+## Copyright 2020 Mercari, Inc.
+## Licensed under the MIT License.
+##
+## Usage: cd repos/my-git-repo && commitver
+##
+## commitver derives a semver-compliant version number from the commits in a repo
+## Starting from the first commit at version 0.0.0, commitver will increment the version number
+## by checking these rules in order. If a rule is hit, apply the rule and move on to the next commit:
+##
+##  1. Q: Is there a `version-at-commit: 0.1.0` version override (format `<major>.<minor>.<patch>`, no pre-release or build identifiers) stored in `.commitver.yaml` in the repo root at this commit?
+##     A: Set the version to the exact version in the file
+##  2. Q: Does the commit message contain `[major]`?
+##     A: Increment the major version by 1, and reset the minor and patch versions to 0
+##  3. Q: Does the commit message contain `[minor]`?
+##     A: Increment the minor version by 1, and reset the patch version to 0
+##  4. Q: Were none of the rules above hit?
+##     A: Increment the patch version by 1
+##
+
+config_filename=".commitver.yaml"
+version_core_regex="(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
+config_regex="^version-at-commit:[[:space:]]*${version_core_regex}[[:space:]]*$"
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
+
+function usage() {
+  echo "You must run commitver from inside a git repo"
+  echo ""
+  echo "Usage: cd repos/my-git-repo && commitver"
+}
+
+if [ -z "${repo_root}" ]; then
+  usage
+  exit 1
+fi
+
+# Git that always runs relative to the repo root
+function repo_git() {
+  git -C "${repo_root}" "${@}"
+}
+
+# Check if this is a new git repo with no commits
+# No commits is equal to 1 commit, at 0.0.0
+# and purely exists to make this work when setting
+# up a new repo.
+any_commit=$(repo_git rev-list -n 1 --all)
+
+if [ -z "${any_commit}" ] ; then
+  echo "0.0.0"
+  exit 0
+fi
+
+current_commit=$(repo_git rev-parse HEAD)
+oldest_commit=$(repo_git rev-list --max-parents=0 HEAD)
+
+# Check the config file for a version override
+# Output format: "${commit_sha} ${version}"
+# This function should return either the latest valid version number found in git history in the config file
+# OR the oldest commit SHA and the default version number 0.0.0
+#
+#  - Broken config files are ignored
+#  - Deleted config files are still found via git history (deleting the config file doesn't break the linearity of version numbers)
+#  - The most recent (in order of git history) commit with a valid config file determines the version
+function get_last_config_version() {
+  version="0.0.0"
+
+  logs=$(repo_git log --format=oneline -- "${config_filename}" 2>/dev/null)
+
+  while IFS= read -r line; do
+    if [ -n "${line}" ]; then
+      ref=$(echo "${line}" | cut -d' ' -f 1)
+
+      file_contents=$(repo_git show "${ref}:${config_filename}")
+      file_version=$(echo "${file_contents}" | grep -E "${config_regex}" | awk '{print $2}')
+
+      if [ -n "${file_version}" ]; then
+        echo "${ref} ${file_version}"
+        return
+      fi
+    fi
+  done <<< "${logs}"
+
+  # ROOT is a placeholder to indicate a place "before" the first
+  # commit in git history
+  echo "ROOT ${version}"
+}
+
+function main() {
+  last_version_details=$(get_last_config_version)
+  last_version_commit=$(echo "${last_version_details}" | cut -d' ' -f 1)
+  last_version=$(echo "${last_version_details}" | cut -d' ' -f 2)
+
+  # Check if we have an explicit version set
+  if [[ "${last_version_commit}" == "${current_commit}" ]]; then
+    echo "${last_version}"
+    return
+  fi
+
+  # To make the first commit in git history valid, we need to add a special-case
+  # which avoids any reference to an initial commit
+  if [[ "${last_version_commit}" == "ROOT" ]]; then
+    log_start=""
+  else
+    log_start="${last_version_commit}.."
+  fi
+
+  subsequent_logs=$(repo_git log --reverse --format=oneline "${log_start}HEAD")
+
+  major=$(echo "${last_version}" | cut -d '.' -f 1)
+  minor=$(echo "${last_version}" | cut -d '.' -f 2)
+  patch=$(echo "${last_version}" | cut -d '.' -f 3)
+
+  while IFS= read -r line; do
+    case "${line}" in
+      *"[major]"*)
+        major=$((major+1))
+        minor=0
+        patch=0
+        ;;
+      *"[minor]"*)
+        minor=$((minor+1))
+        patch=0
+        ;;
+      *)
+        patch=$((patch+1))
+        ;;
+    esac
+  done <<< "${subsequent_logs}"
+
+  echo "${major}.${minor}.${patch}"
+}
+
+main
