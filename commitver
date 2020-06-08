@@ -8,9 +8,10 @@
 ##
 ## Usage: cd repos/my-git-repo && commitver
 ##
-## commitver derives a semver-compliant version number from the commits in a repo
-## Starting from the first commit at version 0.0.0, commitver will increment the version number
-## by checking these rules in order. If a rule is hit, apply the rule and move on to the next commit:
+## commitver derives a semver-compliant version number from the commits in a repo.
+##
+## Starting from version 0.0.0, commitver will iterate over all git commits from the beginning of the repo, and increment the version number.
+## For each commit, it will check these rules in order. If a rule is hit, apply the rule and move on to the next commit:
 ##
 ##  1. Q: Is there a `version-at-commit: 0.1.0` version override (format `<major>.<minor>.<patch>`, no pre-release or build identifiers) stored in `.commitver.yaml` in the repo root at this commit?
 ##     A: Set the version to the exact version in the file
